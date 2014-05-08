@@ -1,6 +1,8 @@
 require 'savon'
 require 'httparty'
 require 'builder/xchar'
+require 'live_identity'
+require 'base64'
 
 # Disable SSL check, need to use proper certs
 # FIXME
@@ -24,14 +26,33 @@ module XLiveServices
         parsed
     end
 
-    def self.Authenticate(url)
-        # TODO
+    def self.DoAuth(identity, serviceName, policy)
+        tries ||= 5
+        identity.AuthToService(serviceName, policy, :SERVICE_TOKEN_FROM_CACHE)
+    rescue LiveIdentity::LiveIdentityError => e
+        retry if e.code == LiveIdentity::IDCRL::HRESULT::PPCRL_E_UNABLE_TO_RETRIEVE_SERVICE_TOKEN and not (tries -= 1).zero?
     end
 
-    def self.BuildHeader(wgxService, action, compactRPSTicket)
+    def self.GetUserAuthService(identity, config)
+        configData = config[:Auth][config[:URL][:GetUserAuth].last]
+        DoAuth(identity, configData[:ServiceName], configData[:Policy])
+    end
+
+    def self.GetWgxService(identity, config)
+        configData = config[:Auth][config[:URL][:WgxService].last]
+        DoAuth(identity, configData[:ServiceName], configData[:Policy])
+    end
+
+    def self.GetUserAuthorization(url, userAuthService)
+        data = HTTParty.post(url, :format => :xml,
+        :body => { :serviceType => 1, :titleId => 0 },
+        :headers => { 'Authorization' => "WLID1.0 #{userAuthService.Token}", 'X-ClientType' => 'panorama' })
+    end
+
+    def self.BuildHeader(endpoint, action, compactRPSTicket)
         %{
         <a:Action s:mustUnderstand="1">#{action}</a:Action>
-        <a:To s:mustUnderstand="1">#{wgxService}</a:To>
+        <a:To s:mustUnderstand="1">#{endpoint}</a:To>
         <o:Security s:mustUnderstand="1" xmlns:o="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-secext-1.0.xsd">
           <cct:RpsSecurityToken wsu:Id="00000000-0000-0000-0000-000000000000" xmlns:cct="http://samples.microsoft.com/wcf/security/Extensibility/" xmlns:wsu="http://docs.oasis-open.org/wss/2004/01/oasis-200401-wss-wssecurity-utility-1.0.xsd">
             <cct:RpsTicket>#{Builder::XChar.encode(compactRPSTicket)}</cct:RpsTicket>
@@ -83,14 +104,13 @@ module XLiveServices
             LastPlayedDate = 3
         end
 
-        def initialize(wgxService, compactRPSTicket)
+        def initialize(endpoint, wgxService)
             @WgxService = wgxService
-            @CompactRPSTicket = compactRPSTicket
-            client.globals[:endpoint] = @WgxService
+            client.globals[:endpoint] = endpoint
         end
 
         def self.BuildOfferGUID(titleId, offerID)
-            "#{offerID}-0000-4000-8000-0000#{titleId.to_s(16)}"
+            "#{offerID}-0000-4000-8000-0000%08x" % titleId
         end
 
         def BuildOfferGUID(titleId, offerID)
@@ -98,7 +118,7 @@ module XLiveServices
         end
 
         def GetHeader(name)
-            XLiveServices::BuildHeader(@WgxService, XLiveServices::BuildAction(client.globals[:namespace], ConfigurationName, name.to_s), @CompactRPSTicket)
+            XLiveServices::BuildHeader(client.globals[:endpoint], XLiveServices::BuildAction(client.globals[:namespace], ConfigurationName, name.to_s), @WgxService.Token)
         end
 
         def GetPurchaseHistory(locale, pageNum, orderBy)
@@ -144,20 +164,47 @@ locale = 'en-US'
 
 config = XLiveServices.GetLcwConfig(locale)
 
-#ticket = XLiveServices.Authenticate(config[:URL][:GetUserAuth].first)
-# Relying Party Suite (RPS) Auth Token
-ticket = 't=PUT-HERE-YOUR-Base64encoded-RPSTicket&p='
+options = { :IDCRL_OPTION_ENVIRONMENT => 'Production' }
+
+live = LiveIdentity.new('{D34F9E47-A73B-44E5-AE67-5D0D8B8CFA76}', 1, :NO_UI, options)
+
+identity = live.GetIdentity('yourLive@Id.com', :IDENTITY_SHARE_ALL)
+
+# Missing few things, not implemented yet
+# TODO
+#
+
+userAuthService = XLiveServices.GetUserAuthService(identity, config)
+
+userAuthorizationInfo = XLiveServices.GetUserAuthorization(config[:URL][:GetUserAuth].first, userAuthService)
+
+accountInfo = userAuthorizationInfo['GetUserAuthorizationInfo']['AccountInfo']
+puts '=== AccountInfo ==='
+puts "XboxPuid: #{accountInfo['XboxPuid']}"
+puts "LivePuid: #{accountInfo['LivePuid']}"
+puts "Tag: #{accountInfo['Tag']}"
+puts "CountryCode: #{accountInfo['CountryCode']}"
+
+puts '=== Subscriptions ==='
+userAuthorizationInfo['GetUserAuthorizationInfo']['SubscriptionInfo']['Subscription'].each do |sub|
+    puts "OfferId: #{sub['OfferId']}"
+    puts "Status: #{sub['Status']}"
+    puts "StartDate: #{sub['StartDate']}"
+    puts "EndDate: #{sub['EndDate']}"
+    puts
+end
+
+wgxService = XLiveServices.GetWgxService(identity, config)
 
 # IDK about this service url 'https://services.gamesforwindows.com/SecurePublic/MarketplaceRestSecure.svc'
 
-marketplace = XLiveServices::MarketplacePublic.new(config[:URL][:WgxService].first, ticket)
+marketplace = XLiveServices::MarketplacePublic.new(config[:URL][:WgxService].first, wgxService)
 
-response = marketplace.GetOfferDetailsPublic(locale, marketplace.BuildOfferGUID(0x425307d6, 'e0000001'))
+TitleID = 0x4d5308d2
+offerGUID = marketplace.BuildOfferGUID(TitleID, 'e0000001')
 
+response = marketplace.GetOfferDetailsPublic(locale, offerGUID)
 offerDetailsPublicResult = response.body["GetOfferDetailsPublicResponse"]["GetOfferDetailsPublicResult"]
-
-#require 'pp'
-#pp response.body
 
 puts "GameTitle: #{offerDetailsPublicResult['GameTitle']}"
 puts "Title: #{offerDetailsPublicResult['Title']}"
@@ -178,3 +225,19 @@ mediaInstance['Urls']['string'].each do |url|
     puts 'URL: ' + url
 end
 
+contentID = Base64.decode64(mediaInstance['ContentId']).unpack('H*').first.upcase
+
+puts "hexContentId: #{contentID}"
+
+mediaUrls = []
+
+# Actually proper way would be to download manifest cab, extract and get links from 'Content\OfferManifest.xml' file
+mediaUrls << "http://download.gfwl.xboxlive.com/content/gfwl/%08X/#{contentID}_1.cab" % TitleID
+
+response = marketplace.GetMediaUrls(mediaUrls, offerGUID)
+mediaUrlsResult = response.body["GetMediaUrlsResponse"]["GetMediaUrlsResult"]
+if (mediaUrlsResult['HResult'].to_i.zero?)
+    puts 'Media URL: ' + mediaUrlsResult['Urls']['string']
+else
+    puts "ERROR: 0x%08X" % mediaUrlsResult['HResult'].to_i
+end
