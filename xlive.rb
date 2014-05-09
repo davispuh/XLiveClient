@@ -70,7 +70,7 @@ module XLiveServices
             serialized = {}
             case type
             when 'enum'
-                # TODO
+                serialized = data.to_s
             when 'uint[]'
                 serialized[:'@xmlns:b'] = 'http://schemas.microsoft.com/2003/10/Serialization/Arrays'
                 serialized[:content!] = { 'b:unsignedInt' => data }
@@ -99,9 +99,9 @@ module XLiveServices
         ConfigurationName = 'IMarketplacePublic'
 
         module SortField
-            Title = 1
-            AvailabilityDate = 2
-            LastPlayedDate = 3
+            Title = :Title
+            AvailabilityDate = :AvailabilityDate
+            LastPlayedDate = :LastPlayedDate
         end
 
         def initialize(endpoint, wgxService)
@@ -121,7 +121,7 @@ module XLiveServices
             XLiveServices::BuildHeader(client.globals[:endpoint], XLiveServices::BuildAction(client.globals[:namespace], ConfigurationName, name.to_s), @WgxService.Token)
         end
 
-        def GetPurchaseHistory(locale, pageNum, orderBy)
+        def GetPurchaseHistory(locale, pageNum = 1, orderBy = SortField::Title)
             client.globals[:soap_header] = GetHeader(__callee__)
             client.call __callee__, message: { locale: locale, pageNum: pageNum, orderBy: Serialization::Serialize('enum', orderBy) }
         end
@@ -203,6 +203,28 @@ wgxService = XLiveServices.GetWgxService(identity, config)
 
 marketplace = XLiveServices::MarketplacePublic.new(config[:URL][:WgxService].first, wgxService)
 
+response = marketplace.GetPurchaseHistory(locale)
+purchaseHistoryResult = response.body["GetPurchaseHistoryResponse"]["GetPurchaseHistoryResult"]
+
+puts "Purchase Offer count: #{purchaseHistoryResult['TotalCount']}"
+
+puts '=== Purchase Offers ==='
+offers = purchaseHistoryResult['Offers']
+offerData = []
+offerData = offers['OfferData'] unless offers.nil?
+offerData = [offerData] unless offerData.is_a?(Array)
+offerData.each do |data|
+    puts "GameTitle: #{data['GameTitle']}"
+    puts "Title: #{data['Title']}"
+    puts "DeveloperName: #{data['DeveloperName']}"
+    puts "PublisherName: #{data['PublisherName']}"
+    puts "Description: #{data['Description']}"
+    puts "GameTitleMediaId: #{data['GameTitleMediaId']}"
+    puts "MediaId: #{data['MediaId']}"
+    puts "OfferId: #{data['OfferId']}"
+    puts
+end
+
 TitleID = 0x4d5308d2
 offerGUID = marketplace.BuildOfferGUID(TitleID, 'e0000001')
 
@@ -247,7 +269,7 @@ if (mediaUrlsResult['HResult'].to_i.zero?)
     urls = [] unless urls
     urls = [urls] unless urls.is_a?(Array)
     urls.each do |url|
-	puts 'Media URL: ' + url
+        puts 'Media URL: ' + url
     end
 else
     puts "ERROR: 0x%08X" % mediaUrlsResult['HResult'].to_i
