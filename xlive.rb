@@ -186,7 +186,10 @@ puts "Tag: #{accountInfo['Tag']}"
 puts "CountryCode: #{accountInfo['CountryCode']}"
 
 puts '=== Subscriptions ==='
-userAuthorizationInfo['GetUserAuthorizationInfo']['SubscriptionInfo']['Subscription'].each do |sub|
+subscriptions = userAuthorizationInfo['GetUserAuthorizationInfo']['SubscriptionInfo']['Subscription']
+subscriptions = [] unless subscriptions
+subscriptions = [subscriptions] unless subscriptions.is_a?(Array)
+subscriptions.each do |sub|
     puts "OfferId: #{sub['OfferId']}"
     puts "Status: #{sub['Status']}"
     puts "StartDate: #{sub['StartDate']}"
@@ -221,7 +224,10 @@ puts "ContentId: #{mediaInstance['ContentId']}"
 puts "InstallSize: #{mediaInstance['InstallSize']}"
 puts "MediaInstanceId: #{mediaInstance['MediaInstanceId']}"
 
-mediaInstance['Urls']['string'].each do |url|
+urls = mediaInstance['Urls']['string']
+urls = [] unless urls
+urls = [urls] unless urls.is_a?(Array)
+urls.each do |url|
     puts 'URL: ' + url
 end
 
@@ -237,7 +243,12 @@ mediaUrls << "http://download.gfwl.xboxlive.com/content/gfwl/%08X/#{contentID}_1
 response = marketplace.GetMediaUrls(mediaUrls, offerGUID)
 mediaUrlsResult = response.body["GetMediaUrlsResponse"]["GetMediaUrlsResult"]
 if (mediaUrlsResult['HResult'].to_i.zero?)
-    puts 'Media URL: ' + mediaUrlsResult['Urls']['string']
+    urls = mediaUrlsResult['Urls']['string']
+    urls = [] unless urls
+    urls = [urls] unless urls.is_a?(Array)
+    urls.each do |url|
+	puts 'Media URL: ' + url
+    end
 else
     puts "ERROR: 0x%08X" % mediaUrlsResult['HResult'].to_i
 end
