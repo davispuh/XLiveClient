@@ -44,7 +44,7 @@ module XLiveServices
     end
 
     def self.GetUserAuthorization(url, userAuthService)
-        data = HTTParty.post(url, :format => :xml,
+        data = HTTParty.post(url, :format => :xml, :verify => VerifyA, # FIXME
         :body => { :serviceType => 1, :titleId => 0 },
         :headers => { 'Authorization' => "WLID1.0 #{userAuthService.Token}", 'X-ClientType' => 'panorama' })
     end
