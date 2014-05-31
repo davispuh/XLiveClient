@@ -1,7 +1,4 @@
 # encoding: UTF-8
 source 'https://rubygems.org'
 
-gem 'savon'
-gem 'httparty'
-gem 'builder'
-gem 'LiveIdentity'
+gem 'XLiveServices', '>= 0.0.2'
